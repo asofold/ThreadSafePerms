@@ -19,8 +19,11 @@ import org.bukkit.event.Listener;
 
 /**
  * Allow access methods for thread safe permission queries.
- * 
+ * <hr>
+ * NOTE: This does not invalidate cache on world changes or logouts. Call removePlayer for if desired, on world changes for instance.
+ * <hr>
  * NOTE: This is a quick attempt, the synchronization is not most intricate and probably not the fastest. Memory usage could also be optimized. 
+ * <hr>
  * 
  * TODO: Check: async task for updating permissions call, if expired but within some range? 
  * 
