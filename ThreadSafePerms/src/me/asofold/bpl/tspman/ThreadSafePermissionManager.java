@@ -27,6 +27,7 @@ import org.bukkit.event.Listener;
  * 
  * TODO: Check: async task for updating permissions call, if expired but within some range? 
  * 
+ * @license Not sure what the use of Bukkit means , so "minimal" license, that is basically Public Domain, no warranty / fitness guarantees - if use of Bukkit API enforces more then that (possibly GPL). 
  * 
  * @author mc_dev
  *
