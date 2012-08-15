@@ -125,7 +125,10 @@ public class ThreadSafePermissionManager implements Listener{
 		final long ts = System.currentTimeMillis();
 		for (final String permission : permissions){
 			PermissionEntry entry = playerEntry.permissions.get(permission);
-			if (entry == null) entry = new PermissionEntry(player.hasPermission(permission), ts);
+			if (entry == null){
+				entry = new PermissionEntry(player.hasPermission(permission), ts);
+				playerEntry.permissions.put(permission, entry);
+			}
 			else if (ts - entry.ts > durExpire){
 				entry.has = player.hasPermission(permission);
 				entry.ts = ts;
