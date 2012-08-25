@@ -1,12 +1,13 @@
 package me.asofold.bpl.tspman;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 
 import org.bukkit.Bukkit;
@@ -76,7 +77,7 @@ public class ThreadSafePermissionManager implements Listener{
 	}
 	
 	private static final class PlayerEntry{
-		public final Map<String, PermissionEntry> permissions = new Hashtable<String, PermissionEntry>(20);
+		public final Map<String, PermissionEntry> permissions = Collections.synchronizedMap(new HashMap<String, PermissionEntry>(20));
 	}
 	
 	private static final class PermissionEntry{
@@ -88,12 +89,12 @@ public class ThreadSafePermissionManager implements Listener{
 		}
 	}
 	
-	private final Map<String, PlayerEntry> players = new Hashtable<String, PlayerEntry>(20, 0.6f);
+	private final Map<String, PlayerEntry> players = Collections.synchronizedMap(new HashMap<String, PlayerEntry>(20, 0.6f));
 	
 	private long durExpire = 10000;
 	
 	public ThreadSafePermissionManager(){
-		// Empty cosntructor !
+		// Empty constructor !
 	}
 	
 	/**
@@ -123,19 +124,140 @@ public class ThreadSafePermissionManager implements Listener{
 		final PlayerEntry playerEntry = getPlayerEntry(player);
 		final Map<String, Boolean> res = new HashMap<String, Boolean>(permissions.size());
 		final long ts = System.currentTimeMillis();
+		final long tsExpire = ts - durExpire;
 		for (final String permission : permissions){
 			PermissionEntry entry = playerEntry.permissions.get(permission);
 			if (entry == null){
 				entry = new PermissionEntry(player.hasPermission(permission), ts);
 				playerEntry.permissions.put(permission, entry);
 			}
-			else if (ts - entry.ts > durExpire){
+			else if (entry.ts < tsExpire){
 				entry.has = player.hasPermission(permission);
 				entry.ts = ts;
 			}
 			res.put(permission, entry.has);
 		}
 		return res;
+	}
+	
+	/**
+	 * Get a set with all permissions that are cached for a player, if desired including expired entries.
+	 * @param player
+	 * @return
+	 */
+	public final Set<String> getPermissionSet(final Player player, final boolean expired){
+		Set<String> perms = new HashSet<String>();
+		final PlayerEntry playerEntry = getPlayerEntry(player);
+		synchronized (playerEntry.permissions){
+			final long tsExpire = System.currentTimeMillis() - durExpire;
+			for (final Entry<String, PermissionEntry> entry : playerEntry.permissions.entrySet()){
+				final PermissionEntry permEntry = entry.getValue();
+				if (expired || permEntry.ts >= tsExpire) perms.add(entry.getKey());
+			}
+		}
+		return perms;
+	}
+	
+	/**
+	 * Get a map with all cached permissions, leaving out expired if desired.
+	 * @param player
+	 * @param expired If to include expired entries.
+	 * @return
+	 */
+	public final Map<String, Boolean> getPermissionMap(final Player player, final boolean expired){
+		Map<String, Boolean> perms = new HashMap<String, Boolean>();
+		final PlayerEntry playerEntry = getPlayerEntry(player);
+		synchronized (playerEntry.permissions){
+			final long tsExpire = System.currentTimeMillis() - durExpire;
+			for (final Entry<String, PermissionEntry> entry : playerEntry.permissions.entrySet()){
+				final PermissionEntry permEntry = entry.getValue();
+				if (expired || permEntry.ts >= tsExpire) perms.put(entry.getKey(), permEntry.has);
+			}
+		}
+		return perms;
+	}
+	
+	/**
+	 * Update all expired permission entries for the player.<br>
+	 * NOTE: THIS CAN ONLY BE CALLED FROM THE MAIN THREAD.
+	 * @param player
+	 * @return
+	 */
+	public final void updatePlayer(final Player player){
+		final PlayerEntry playerEntry = getPlayerEntry(player);
+		synchronized (playerEntry.permissions){
+			final long ts = System.currentTimeMillis();
+			final long tsExpire = ts - durExpire;
+			for (final Entry<String, PermissionEntry> entry : playerEntry.permissions.entrySet()){
+				final PermissionEntry permEntry = entry.getValue();
+				if (permEntry.ts < tsExpire){
+					permEntry.ts = ts;
+					permEntry.has = player.hasPermission(entry.getKey());
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Update all expired given permission entries for the player, add missing entries.<br>
+	 * NOTE: THIS CAN ONLY BE CALLED FROM THE MAIN THREAD.
+	 * @param player
+	 * @return
+	 */
+	public final void updatePlayer(final Player player, final Collection<String> permissions){
+		final PlayerEntry playerEntry = getPlayerEntry(player);
+		synchronized (playerEntry.permissions){
+			final long ts = System.currentTimeMillis();
+			final long tsExpire = ts - durExpire;
+			for (final String perm : permissions){
+				final PermissionEntry permEntry = playerEntry.permissions.get(perm);
+				if (permEntry == null) playerEntry.permissions.put(perm, new PermissionEntry(player.hasPermission(perm), ts));
+				else if (permEntry.ts < tsExpire){
+					permEntry.ts = ts;
+					permEntry.has = player.hasPermission(perm);
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Update all permissions for a player, overwrite all.<br>
+	 * NOTE: THIS CAN ONLY BE CALLED FROM THE MAIN THREAD.
+	 * @param player
+	 */
+	public final void forceUpdatePlayer(final Player player){
+		final PlayerEntry playerEntry = getPlayerEntry(player);
+		synchronized (playerEntry.permissions){
+			final long ts = System.currentTimeMillis();
+			for (final Entry<String, PermissionEntry> entry : playerEntry.permissions.entrySet()){
+				final PermissionEntry permEntry = entry.getValue();
+				permEntry.ts = ts;
+				permEntry.has = player.hasPermission(entry.getKey());
+			}
+		}
+	}
+	
+	/**
+	 * Update all given permissions for a player, update missing entries, overwrite all.<br>
+	 * NOTE: THIS CAN ONLY BE CALLED FROM THE MAIN THREAD.
+	 * <hr>
+	 * This can be used in a sync task to ensure the permissions are there for your async calls.
+	 * @param player
+	 * @param permissions The permissions to update.
+	 */
+	public final void forceUpdatePlayer(final Player player, final Collection<String> permissions){
+		final PlayerEntry playerEntry = getPlayerEntry(player);
+		synchronized (playerEntry.permissions){
+			final long ts = System.currentTimeMillis();
+			for (String perm : permissions){
+				final PermissionEntry permEntry = playerEntry.permissions.get(perm);
+				if (permEntry == null) playerEntry.permissions.put(perm, new PermissionEntry(player.hasPermission(perm), ts));
+				else{
+					permEntry.ts = ts;
+					permEntry.has = player.hasPermission(perm);
+				}
+			}
+		}
 	}
 	
 	/**
@@ -150,11 +272,11 @@ public class ThreadSafePermissionManager implements Listener{
 		final PlayerEntry playerEntry = getPlayerEntry(player);
 		final Set<String> notPresent = new HashSet<String>();
 		final Map<String, Boolean> result = new HashMap<String, Boolean>();
-		final long ts = System.currentTimeMillis();
+		final long tsExpire = System.currentTimeMillis() - durExpire;
 		for (final String perm : permissions){
 			final PermissionEntry entry = playerEntry.permissions.get(perm);
 			if (entry == null) notPresent.add(perm);
-			else if (ts - entry.ts > durExpire) notPresent.add(perm);
+			else if (entry.ts < tsExpire) notPresent.add(perm);
 			else result.put(perm, entry.has);
 		}
 		if (!notPresent.isEmpty()){
